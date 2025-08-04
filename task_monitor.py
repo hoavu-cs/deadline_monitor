@@ -1,56 +1,44 @@
-import sqlite3
+# deepseek_prompt.py
+
 import requests
 
-def extract_task_info(prompt):
-    system_prompt = f"""
-Extract the following fields from this task instruction:
-- project_name (e.g., "Project X")
-- due_date (format: YYYY-MM-DD)
-- task_type (e.g., "report", "review", "meeting")
-- description (the full sentence)
+import requests
 
-Return valid JSON with keys: project_name, due_date, task_type, description.
-Task: "{prompt}"
-"""
-    r = requests.post(
+def generate_task(task_string):
+    prompt = f"""
+        You are a helpful assistant. Extract the following structured task information from the prompt below:
+
+        Fields:
+        - Description
+        - People
+        - Supervisor
+        - Deadline
+        
+        Prompt:
+        "{task_string}"
+        Format the output like:
+        Description: ...
+        People: ...
+        Supervisor: ...
+        Deadline: ...
+        """
+
+    response = requests.post(
         "http://localhost:11434/api/generate",
         json={
-            "model": "deepseek-coder:instruct",
-            "prompt": system_prompt,
+            "model": "llama3",  # Updated from deepseek-coder
+            "prompt": prompt,
             "stream": False
         }
     )
-    return r.json()["response"]
 
-def insert_into_db(data):
-    conn = sqlite3.connect("tasks.db")
-    cursor = conn.cursor()
-    cursor.execute("""CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        description TEXT,
-        project_name TEXT,
-        due_date DATE,
-        task_type TEXT,
-        status TEXT DEFAULT 'pending'
-    )""")
-    cursor.execute(
-        "INSERT INTO tasks (description, project_name, due_date, task_type) VALUES (?, ?, ?, ?)",
-        (data["description"], data["project_name"], data["due_date"], data["task_type"])
-    )
-    conn.commit()
-    conn.close()
+    if response.status_code != 200:
+        raise RuntimeError(f"Error from Ollama: {response.text}")
 
-# Full pipeline
+    return response.json()["response"]
+
+
 if __name__ == "__main__":
-    user_input = input("Enter a task: ")
-    response = extract_task_info(user_input)
-
-    # Safe parsing of JSON from LLM
-    import json
-    try:
-        parsed = json.loads(response)
-        insert_into_db(parsed)
-        print("✅ Task inserted successfully.")
-    except Exception as e:
-        print("❌ Failed to parse or insert task:", e)
-        print("LLM response was:", response)
+    user_input = input("Enter a prompt: ")
+    output = generate_task(user_input)
+    print("\n💬 Agent says:\n", output)
