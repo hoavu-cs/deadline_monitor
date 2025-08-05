@@ -14,16 +14,14 @@ def query_ollama(prompt: str) -> str:
         raise RuntimeError(f"Ollama error: {response.text}")
     return response.json()["response"]
 
-# Classify user command into one of the pre-defined tasks
 def classify_command(user_input: str) -> str:
     prompt = f"""
             Classify the following command into one of: 'add_person', 'add_task', or 'other'.
             Command: "{user_input}"
             Answer with one word only.
             """
-    return query_ollama(prompt).strip().lower()
+    return query_ollama(prompt).strip("'\"").lower()
 
-# Extract person fields from natural language text
 def extract_person_fields(text):
     prompt = f"""
             Extract the following fields from the text below.
@@ -47,7 +45,6 @@ def extract_person_fields(text):
             email = line.split(":", 1)[1].strip()
     return name, email
 
-# Extract task fields from natural language text
 def extract_task_fields(text):
     prompt = f"""
             You are an assistant that extracts structured task information.
@@ -56,7 +53,6 @@ def extract_task_fields(text):
 
             Title: <short task title>
             Description: <brief description of the task>
-            Supervisor: <person supervising the task>
             Deadline: <deadline in YYYY-MM-DD format>
 
             Do not include any explanation, extra lines, or labels.
@@ -66,17 +62,15 @@ def extract_task_fields(text):
             """
 
     output = query_ollama(prompt)
-    title, desc, supervisor, deadline = None, None, None, None
+    title, desc, deadline = None, None, None
     for line in output.splitlines():
         if line.lower().startswith("title:"):
             title = line.split(":", 1)[1].strip()
         elif line.lower().startswith("description:"):
             desc = line.split(":", 1)[1].strip()
-        elif line.lower().startswith("supervisor:"):
-            supervisor = line.split(":", 1)[1].strip()
         elif line.lower().startswith("deadline:"):
             deadline = line.split(":", 1)[1].strip()
-    return title, desc, supervisor, deadline
+    return title, desc, deadline
 
 def insert_person(name, email):
     if not name or not email:
@@ -89,8 +83,8 @@ def insert_person(name, email):
     conn.close()
     print(f"✅ Person added: {name} ({email})")
 
-def insert_task(title, description, supervisor, deadline):
-    if not title or not description or not supervisor or not deadline:
+def insert_task(title, description, deadline):
+    if not title or not description or not deadline:
         print("❌ Missing one or more task fields. Task not added.")
         return
     conn = sqlite3.connect("people.db")
@@ -99,7 +93,7 @@ def insert_task(title, description, supervisor, deadline):
                    (title, description, deadline))
     conn.commit()
     conn.close()
-    print(f"✅ Task added: {title} (supervisor: {supervisor}, deadline: {deadline})")
+    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}")
 
 # ---- MAIN LOOP ----
 if __name__ == "__main__":
@@ -112,8 +106,8 @@ if __name__ == "__main__":
         insert_person(name, email)
 
     elif intent == "add_task":
-        title, desc, supervisor, deadline = extract_task_fields(user_input)
-        insert_task(title, desc, supervisor, deadline)
+        title, desc, deadline = extract_task_fields(user_input)
+        insert_task(title, desc, deadline)
 
     else:
         print("🤖 I’m not sure what you’re asking. Please clarify.")
