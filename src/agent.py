@@ -1,6 +1,7 @@
 import sqlite3
 import requests
 import re
+import random
 from my_package.db_queries import get_id_by_email
 
 OLLAMA_MODEL = "llama3"
@@ -107,6 +108,20 @@ def assign_person_to_task(conn, person_id, task_id, role):
     )
     print(f"✅ Assigned person {person_id} to task {task_id} as {role}")
 
+def generate_tag_with_llama(title: str) -> str:
+    prompt = f"""
+    Generate a lowercase tag based on the task title.
+    - Use short keywords from the title (lowercase, no punctuation)
+    - Add 2 random digits at the end to ensure uniqueness
+    - Do not include quotes, punctuation, or explanations
+
+    Title: {title}
+    Tag:
+    """
+    tag_base = query_ollama(prompt).strip().replace(" ", "_")
+    random_digits = f"{random.randint(0, 99):02d}"
+    return f"#{tag_base}{random_digits}"
+
 def insert_task(title, description, deadline, supervisor_emails, member_emails):
     if not title or not description or not deadline:
         print("❌ Missing one or more task fields. Task not added.")
@@ -114,9 +129,10 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails):
 
     conn = sqlite3.connect("people.db")
     cursor = conn.cursor()
+    generated_tag = generate_tag_with_llama(title)
 
     # Insert the task
-    cursor.execute("INSERT INTO tasks (title, description, deadline) VALUES (?, ?, ?)", (title, description, deadline))
+    cursor.execute("INSERT INTO tasks (title, description, deadline, tag) VALUES (?, ?, ?, ?)", (title, description, deadline, generated_tag))
     conn.commit()
 
     # Get task ID
@@ -129,7 +145,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails):
         return 
 
     task_id = result[0]
-    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}")
+    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}, Tag: {generated_tag}")
 
     # Handle supervisor assignment
     for email in supervisor_emails:
@@ -169,8 +185,6 @@ if __name__ == "__main__":
 
         elif intent == "add_task":
             title, desc, deadline, supervisor_emails, member_emails = extract_task_fields(user_input)
-            print(f"Member Emails: {member_emails}")
-            print(f"Supervisor Emails: {supervisor_emails}")
             insert_task(title, desc, deadline, supervisor_emails, member_emails)
 
         else:
