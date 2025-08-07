@@ -18,7 +18,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT,
     description TEXT,
-    deadline TEXT)
+    deadline TEXT,
+    tag TEXT UNIQUE,
+    importance INTEGER CHECK(importance BETWEEN 1 AND 5) DEFAULT 3
+)
 """)
 
 cursor.execute("""
