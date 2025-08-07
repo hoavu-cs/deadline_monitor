@@ -57,6 +57,7 @@ def extract_task_fields(text):
             Deadline: <deadline in YYYY-MM-DD format>
             Supervisor Emails: <comma-separated list of supervisor emails>
             Member Emails: <comma-separated list of task member emails>
+            Importance: <importance level from 1 to 5>
 
             Do not include any explanation or extra lines.
 
@@ -81,9 +82,15 @@ def extract_task_fields(text):
             supervisor_emails = [s.strip() for s in line.split(":", 1)[1].split(",") if s.strip()]
         elif line.strip().lower().startswith("member emails:"):
             member_emails = [m.strip() for m in line.split(":", 1)[1].split(",") if m.strip()]
+        elif line.strip().lower().startswith("importance:"):
+            importance = line.split(":", 1)[1].strip()
+            if importance.isdigit() and 1 <= int(importance) <= 5:
+                importance = int(importance)
+            else:
+                importance = 3
 
     print(f"{output}")
-    return title, desc, deadline, supervisor_emails, member_emails
+    return title, desc, deadline, supervisor_emails, member_emails, importance
 
 def insert_person(name, email):
     if not name or not email:
@@ -122,7 +129,7 @@ def generate_tag_with_llama(title: str) -> str:
     random_digits = f"{random.randint(0, 99):02d}"
     return f"#{tag_base}{random_digits}"
 
-def insert_task(title, description, deadline, supervisor_emails, member_emails):
+def insert_task(title, description, deadline, supervisor_emails, member_emails,  importance=3):
     if not title or not description or not deadline:
         print("❌ Missing one or more task fields. Task not added.")
         return
@@ -132,7 +139,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails):
     generated_tag = generate_tag_with_llama(title)
 
     # Insert the task
-    cursor.execute("INSERT INTO tasks (title, description, deadline, tag) VALUES (?, ?, ?, ?)", (title, description, deadline, generated_tag))
+    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance) VALUES (?, ?, ?, ?, ?)", (title, description, deadline, generated_tag, importance))
     conn.commit()
 
     # Get task ID
@@ -145,7 +152,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails):
         return 
 
     task_id = result[0]
-    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}, Tag: {generated_tag}")
+    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}, Tag: {generated_tag}, Importance: {importance}")
 
     # Handle supervisor assignment
     for email in supervisor_emails:
@@ -184,8 +191,8 @@ if __name__ == "__main__":
             insert_person(name, email)
 
         elif intent == "add_task":
-            title, desc, deadline, supervisor_emails, member_emails = extract_task_fields(user_input)
-            insert_task(title, desc, deadline, supervisor_emails, member_emails)
+            title, desc, deadline, supervisor_emails, member_emails, importance = extract_task_fields(user_input)
+            insert_task(title, desc, deadline, supervisor_emails, member_emails, importance)
 
         else:
             print("🤖 I’m not sure what you’re asking. Please clarify.")
