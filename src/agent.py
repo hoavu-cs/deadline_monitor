@@ -2,7 +2,9 @@ import sqlite3
 import requests
 import re
 import random
-from my_package.db_queries import get_id_by_email
+from db_queries import get_id_by_email
+from db_queries import list_tasks_with_people
+from db_queries import list_people_with_tasks
 
 OLLAMA_MODEL = "llama3"
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -18,7 +20,7 @@ def query_ollama(prompt: str):
 
 def classify_command(user_input: str):
     prompt = f"""
-            Classify the following command into one of: 'add_person', 'add_task', or 'other'.
+            Classify the following command into one of: 'add_person', 'add_task', 'display_tasks', 'display_people', or 'other'.
             Command: "{user_input}"
             Answer with one word only.
             """
@@ -97,7 +99,7 @@ def insert_person(name, email):
         print("❌ Missing name or email. Person not added.")
         return
     try:
-        conn = sqlite3.connect("people.db")
+        conn = sqlite3.connect("database/my_db.db")
         cursor = conn.cursor()
         cursor.execute("INSERT INTO people (name, email) VALUES (?, ?)", (name, email))
         conn.commit()
@@ -134,7 +136,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails, 
         print("❌ Missing one or more task fields. Task not added.")
         return
 
-    conn = sqlite3.connect("people.db")
+    conn = sqlite3.connect("database/my_db.db")
     cursor = conn.cursor()
     generated_tag = generate_tag_with_llama(title)
 
@@ -156,7 +158,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails, 
 
     # Handle supervisor assignment
     for email in supervisor_emails:
-        person_id = get_id_by_email(email=email, db_path="people.db")
+        person_id = get_id_by_email(email=email, db_path="database/my_db.db")
         if person_id:
             assign_person_to_task(conn, person_id, task_id, "supervisor")
         else:
@@ -164,7 +166,7 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails, 
 
     # Handle member assignment
     for email in member_emails:
-        person_id = get_id_by_email(email=email, db_path="people.db")
+        person_id = get_id_by_email(email=email, db_path="database/my_db.db")
         if person_id:
             assign_person_to_task(conn, person_id, task_id, "member")
         else:
@@ -193,6 +195,22 @@ if __name__ == "__main__":
         elif intent == "add_task":
             title, desc, deadline, supervisor_emails, member_emails, importance = extract_task_fields(user_input)
             insert_task(title, desc, deadline, supervisor_emails, member_emails, importance)
+
+        elif intent == "display_tasks":
+            print("📋 Current task assignments:")
+            assignments = list_tasks_with_people(db_path="database/my_db.db")
+            for desc, tag, people in assignments:
+                print(f"** Task: {desc} (Tag: {tag}) assigned to:")
+                for person in people:
+                    print(f"  - {person}")
+
+        elif intent == "display_people":
+            print("👥 Current people in the database:")
+            people = list_people_with_tasks(db_path="database/my_db.db")  # or your actual path
+            for person_name, person_email, tasks in people:
+                print(f"** {person_name} <{person_email}> has tasks:")
+                for title, tag, role in tasks:
+                    print(f"  - {title} (Tag: {tag}, Role: {role})")
 
         else:
             print("🤖 I’m not sure what you’re asking. Please clarify.")
