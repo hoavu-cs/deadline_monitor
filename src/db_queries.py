@@ -31,9 +31,22 @@ def list_people(db_path=""):
     conn.close()
     return people
 
+from collections import OrderedDict
+import sqlite3
+
 def list_tasks_with_people(db_path):
     """
-    Returns a list of (task_description, task_tag, people_and_roles)
+    Returns an OrderedDict sorted by importance (descending):
+    {
+        task_id: {
+            "title": str,
+            "description": str,
+            "tag": str,
+            "importance": int,
+            "people": [ (role, "Name <email>"), ... ]
+        },
+        ...
+    }
     """
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -42,8 +55,10 @@ def list_tasks_with_people(db_path):
     cur.execute("""
         SELECT
             t.id,
+            t.title,
             t.description,
             t.tag,
+            t.importance,
             p.name,
             p.email,
             a.role
@@ -53,25 +68,34 @@ def list_tasks_with_people(db_path):
         ORDER BY t.id, p.name
     """)
 
-    tasks = OrderedDict()
-    for task_id, desc, tag, name, email, role in cur.fetchall():
+    tasks = {}
+    for task_id, title, desc, tag, importance, name, email, role in cur.fetchall():
         if task_id not in tasks:
-            tasks[task_id] = {"desc": desc, "tag": tag, "people": []}
-        tasks[task_id]["people"].append((role, f"{name} <{email}> ({role})"))
+            tasks[task_id] = {
+                "title": title,
+                "description": desc,
+                "tag": tag,
+                "importance": importance,
+                "people": []
+            }
+        # keep tuples; person string does NOT include role
+        tasks[task_id]["people"].append((role, f"{name} <{email}>"))
 
     conn.close()
 
-    # Sort people: supervisors first, then members
-    result = []
+    # Sort people: supervisors first, then members (keep tuples)
     role_order = {"supervisor": 0, "member": 1}
     for task in tasks.values():
-        sorted_people = [
-            person for _, person in
-            sorted(task["people"], key=lambda x: role_order.get(x[0], 99))
-        ]
-        result.append((task["desc"], task["tag"], sorted_people))
+        task["people"] = sorted(
+            task["people"],
+            key=lambda x: role_order.get(x[0], 99)
+        )
 
-    return result
+    # Sort tasks by importance (descending)
+    sorted_tasks = OrderedDict(
+        sorted(tasks.items(), key=lambda x: (-x[1]["importance"], x[0]))
+    )
+    return sorted_tasks
 
 def list_people_with_tasks(db_path):
     """
@@ -105,4 +129,4 @@ def list_people_with_tasks(db_path):
 
     conn.close()
 
-    return [(d["name"], d["email"], d["tasks"]) for d in people_tasks.values()]
+    return people_tasks
