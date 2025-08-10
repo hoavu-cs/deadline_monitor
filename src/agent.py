@@ -20,7 +20,8 @@ def query_ollama(prompt: str):
 
 def classify_command(user_input: str):
     prompt = f"""
-            Classify the following command into one of: 'add_person', 'add_task', 'display_tasks', 'display_people', or 'other'.
+            Classify the following command into one of: 'add_person', 'add_task', 'display_tasks', \
+                                                        'display_people', 'add_person_to_task', or 'other'.
             Command: "{user_input}"
             Answer with one word only.
             """
@@ -93,6 +94,35 @@ def extract_task_fields(text):
 
     print(f"{output}")
     return title, desc, deadline, supervisor_emails, member_emails, importance
+
+def extract_person_task_fields(text):
+    prompt = f"""
+            Extract the following fields from the text below.
+
+            Return output **only** in the following format:
+            Email: <email address>
+            Task Tag: <task tag>
+            Role: <role>
+
+            Do not include any explanation or extra lines.
+
+            Text:
+            {text}
+            """
+
+    output = query_ollama(prompt)
+
+    email = task_tag = role = None
+
+    for line in output.splitlines():
+        if line.lower().startswith("email:"):
+            email = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("task tag:"):
+            task_tag = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("role:"):
+            role = line.split(":", 1)[1].strip()
+        
+    return email, task_tag, role
 
 def insert_person(name, email):
     if not name or not email:
@@ -176,6 +206,27 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails, 
     conn.commit()
     conn.close()
 
+def add_person_to_task(email, task_tag, role):
+    conn = sqlite3.connect("database/my_db.db")
+    cursor = conn.cursor()
+
+    person_id = get_id_by_email(email=email, db_path="database/my_db.db")
+    if not person_id:
+        print(f"⚠️ No person found with email: {email}")
+        return
+
+    cursor.execute("SELECT id FROM tasks WHERE tag = ?", (task_tag,))
+    result = cursor.fetchone()
+    if not result:
+        print(f"⚠️ No task found with tag: {task_tag}")
+        return
+
+    task_id = result[0]
+
+    assign_person_to_task(conn, person_id, task_id, role)
+    conn.commit()
+    conn.close()
+
 # ---- MAIN LOOP ----
 if __name__ == "__main__":
     print("🧠 Agent is ready. Type 'exit' or 'quit' to stop.\n")
@@ -196,6 +247,10 @@ if __name__ == "__main__":
         elif intent == "add_task":
             title, desc, deadline, supervisor_emails, member_emails, importance = extract_task_fields(user_input)
             insert_task(title, desc, deadline, supervisor_emails, member_emails, importance)
+
+        elif intent == "add_person_to_task":
+            email, task_tag, role = extract_person_task_fields(user_input)
+            add_person_to_task(email, task_tag, role)
 
         elif intent == "display_tasks":
             print("📋 Current task assignments:")
