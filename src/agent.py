@@ -141,7 +141,8 @@ def insert_task(title, description, deadline, supervisor_emails, member_emails, 
     generated_tag = generate_tag_with_llama(title)
 
     # Insert the task
-    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance) VALUES (?, ?, ?, ?, ?)", (title, description, deadline, generated_tag, importance))
+    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance) VALUES (?, ?, ?, ?, ?)", \
+        (title, description, deadline, generated_tag, importance))
     conn.commit()
 
     # Get task ID
@@ -199,17 +200,17 @@ if __name__ == "__main__":
         elif intent == "display_tasks":
             print("📋 Current task assignments:")
             assignments = list_tasks_with_people(db_path="database/my_db.db")
-            for desc, tag, people in assignments:
-                print(f"** Task: {desc} (Tag: {tag}) assigned to:")
-                for person in people:
-                    print(f"  - {person}")
+            for a in assignments.values():
+                print(f"** Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}")
+                for role, person in a["people"]:
+                    print(f"  - {person} ({role})")
 
         elif intent == "display_people":
             print("👥 Current people in the database:")
-            people = list_people_with_tasks(db_path="database/my_db.db")  # or your actual path
-            for person_name, person_email, tasks in people:
-                print(f"** {person_name} <{person_email}> has tasks:")
-                for title, tag, role in tasks:
+            people_tasks = list_people_with_tasks(db_path="database/my_db.db")  # or your actual path
+            for person_id, info in people_tasks.items():
+                print(f"** {info['name']} <{info['email']}> has tasks:")
+                for title, tag, role in info["tasks"]:
                     print(f"  - {title} (Tag: {tag}, Role: {role})")
 
         else:
