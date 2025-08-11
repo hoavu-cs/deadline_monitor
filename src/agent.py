@@ -2,12 +2,37 @@ import sqlite3
 import requests
 import re
 import random
-from db_queries import get_id_by_email
-from db_queries import list_tasks_with_people
-from db_queries import list_people_with_tasks
+from db_queries import *
 
 OLLAMA_MODEL = "llama3"
 OLLAMA_URL = "http://localhost:11434/api/generate"
+
+# ===== Function Signatures =====
+
+def query_ollama(prompt: str) -> str:
+    """Send prompt to Ollama API and return the generated response."""
+
+def classify_command(user_input: str) -> str:
+    """Classify a user command into one of the predefined intents."""
+
+def extract_person_fields(text: str) -> tuple[str | None, str | None]:
+    """Extract 'Name' and 'Email' from text."""
+
+def extract_task_fields(text: str) -> tuple[
+    str | None, str | None, str | None, list[str], list[str], int
+]:
+    """Extract task fields including title, description, deadline, emails, and importance."""
+
+def extract_person_task_fields(text: str) -> tuple[str | None, str | None, str | None]:
+    """Extract email, task tag, and role (supervisor/member) from text."""
+
+def extract_person_task_fields_for_deletions(text: str) -> tuple[str | None, str | None]:
+    """Extract email and task tag for deletion commands."""
+
+def generate_tag_with_llama(title: str) -> str:
+    """Generate a lowercase, unique task tag from a title."""
+
+# ===== Function Implementations =====
 
 def query_ollama(prompt: str):
     response = requests.post(
@@ -21,9 +46,14 @@ def query_ollama(prompt: str):
 def classify_command(user_input: str):
     prompt = f"""
             Classify the following command into one of: 'add_person', 'add_task', 'display_tasks', \
-                                                        'display_people', 'add_person_to_task', or 'other'.
+                                                        'display_people', 'add_person_to_task', \
+                                                        'remove_person_from_task', or 'other'.
             Command: "{user_input}"
-            Answer with one word only.
+            
+
+            Constraints:
+            - Answer with one word only.
+            - The response must be in one of the listed intents.
             """
     return query_ollama(prompt).strip("'\"").lower()
 
@@ -43,6 +73,7 @@ def extract_person_fields(text):
 
     output = query_ollama(prompt)
     name, email = None, None
+
     for line in output.splitlines():
         if line.lower().startswith("name:"):
             name = line.split(":", 1)[1].strip()
@@ -69,7 +100,6 @@ def extract_task_fields(text):
             """
 
     output = query_ollama(prompt)
-    
     title = desc = deadline = None
     supervisor_emails = []
     member_emails = []
@@ -104,14 +134,17 @@ def extract_person_task_fields(text):
             Task Tag: <task tag>
             Role: <role>
 
-            Do not include any explanation or extra lines.
+            Constraints:
+            - Role must be exactly one of: "supervisor" or "member".
+            - If role is unclear or missing, choose the most likely one but still output only "supervisor" or "member".
+            - Do not output anything except the three lines above.
+            - Do not modify or remove the '#' symbol from the Task Tag.
 
             Text:
             {text}
             """
 
     output = query_ollama(prompt)
-
     email = task_tag = role = None
 
     for line in output.splitlines():
@@ -124,30 +157,33 @@ def extract_person_task_fields(text):
         
     return email, task_tag, role
 
-def insert_person(name, email):
-    if not name or not email:
-        print("❌ Missing name or email. Person not added.")
-        return
-    try:
-        conn = sqlite3.connect("database/my_db.db")
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO people (name, email) VALUES (?, ?)", (name, email))
-        conn.commit()
-        print(f"✅ Person added: {name} ({email})")
-    except sqlite3.IntegrityError:
-        print(f"❌ Email {email} already exists. Person not added.")
-    finally:
-        conn.close()
+def extract_person_task_fields_for_deletions(text):
+    prompt = f"""
+            Extract the following fields from the text below.
 
-def assign_person_to_task(conn, person_id, task_id, role):
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO task_assignments (person_id, task_id, role) VALUES (?, ?, ?)",
-        (person_id, task_id, role)
-    )
-    print(f"✅ Assigned person {person_id} to task {task_id} as {role}")
+            Return output **only** in the following format:
+            Email: <email address>
+            Task Tag: <task tag>
 
-def generate_tag_with_llama(title: str) -> str:
+            Constraints:
+            - Do not modify or remove the '#' symbol from the Task Tag.
+
+            Text:
+            {text}
+            """
+
+    output = query_ollama(prompt)
+    email = task_tag = None
+
+    for line in output.splitlines():
+        if line.lower().startswith("email:"):
+            email = line.split(":", 1)[1].strip()
+        elif line.lower().startswith("task tag:"):
+            task_tag = line.split(":", 1)[1].strip()
+
+    return email, task_tag
+
+def generate_tag_with_llama(title: str):
     prompt = f"""
     Generate a lowercase tag based on the task title.
     - Use short keywords from the title (lowercase, no punctuation)
@@ -160,72 +196,6 @@ def generate_tag_with_llama(title: str) -> str:
     tag_base = query_ollama(prompt).strip().replace(" ", "_")
     random_digits = f"{random.randint(0, 99):02d}"
     return f"#{tag_base}{random_digits}"
-
-def insert_task(title, description, deadline, supervisor_emails, member_emails,  importance=3):
-    if not title or not description or not deadline:
-        print("❌ Missing one or more task fields. Task not added.")
-        return
-
-    conn = sqlite3.connect("database/my_db.db")
-    cursor = conn.cursor()
-    generated_tag = generate_tag_with_llama(title)
-
-    # Insert the task
-    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance) VALUES (?, ?, ?, ?, ?)", \
-        (title, description, deadline, generated_tag, importance))
-    conn.commit()
-
-    # Get task ID
-    cursor.execute("SELECT id FROM tasks WHERE title = ?", (title,))
-    result = cursor.fetchone()
-
-    if not result:
-        print("❌ Could not find task after insertion.")
-        conn.close()
-        return 
-
-    task_id = result[0]
-    print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}, Tag: {generated_tag}, Importance: {importance}")
-
-    # Handle supervisor assignment
-    for email in supervisor_emails:
-        person_id = get_id_by_email(email=email, db_path="database/my_db.db")
-        if person_id:
-            assign_person_to_task(conn, person_id, task_id, "supervisor")
-        else:
-            print(f"⚠️ No person found with email: {email}")
-
-    # Handle member assignment
-    for email in member_emails:
-        person_id = get_id_by_email(email=email, db_path="database/my_db.db")
-        if person_id:
-            assign_person_to_task(conn, person_id, task_id, "member")
-        else:
-            print(f"⚠️ No person found with email: {email}")
-
-    conn.commit()
-    conn.close()
-
-def add_person_to_task(email, task_tag, role):
-    conn = sqlite3.connect("database/my_db.db")
-    cursor = conn.cursor()
-
-    person_id = get_id_by_email(email=email, db_path="database/my_db.db")
-    if not person_id:
-        print(f"⚠️ No person found with email: {email}")
-        return
-
-    cursor.execute("SELECT id FROM tasks WHERE tag = ?", (task_tag,))
-    result = cursor.fetchone()
-    if not result:
-        print(f"⚠️ No task found with tag: {task_tag}")
-        return
-
-    task_id = result[0]
-
-    assign_person_to_task(conn, person_id, task_id, role)
-    conn.commit()
-    conn.close()
 
 # ---- MAIN LOOP ----
 if __name__ == "__main__":
@@ -242,31 +212,64 @@ if __name__ == "__main__":
 
         if intent == "add_person":
             name, email = extract_person_fields(user_input)
-            insert_person(name, email)
+            conn = sqlite3.connect("database/my_db.db")
+            result = insert_person(name, email, conn)
+            if result:
+                print(f"✅ Person added: {name} ({email})")
+            else:
+                print(f"❌ Failed to add person: {name} ({email})")
+            conn.close()
 
         elif intent == "add_task":
             title, desc, deadline, supervisor_emails, member_emails, importance = extract_task_fields(user_input)
-            insert_task(title, desc, deadline, supervisor_emails, member_emails, importance)
+            tag = generate_tag_with_llama(title)
+            conn = sqlite3.connect("database/my_db.db")
+            result = insert_task(title, desc, deadline, tag, supervisor_emails, member_emails, importance, conn)
+            if result:
+                print(f"✅ Task added: {title} (Tag: {tag})")
+            else:
+                print(f"❌ Failed to add task: {title} (Tag: {tag})")
+            conn.close()
 
         elif intent == "add_person_to_task":
             email, task_tag, role = extract_person_task_fields(user_input)
-            add_person_to_task(email, task_tag, role)
+            conn = sqlite3.connect("database/my_db.db")
+            result = insert_person_task_pair(email, task_tag, role, conn=conn)
+            if result:
+                print(f"✅ Added {role} with email {email} to task with tag {task_tag}")
+            else:
+                print(f"❌ Failed to add {role} with email {email} to task with tag {task_tag}")
+            conn.close()
+
+        elif intent == "remove_person_from_task":
+            email, task_tag = extract_person_task_fields_for_deletions(user_input)
+            conn = sqlite3.connect("database/my_db.db")
+            result = remove_person_task_pair(email, task_tag, conn=conn)
+            if result:
+                print(f"✅ Removed email {email} from task with tag {task_tag}")
+            else:
+                print(f"❌ Failed to remove email {email} from task with tag {task_tag}")
+            conn.close()
 
         elif intent == "display_tasks":
             print("📋 Current task assignments:")
-            assignments = list_tasks_with_people(db_path="database/my_db.db")
+            conn = sqlite3.connect("database/my_db.db")
+            assignments = list_tasks_with_people(conn=conn)
             for a in assignments.values():
                 print(f"** Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}")
                 for role, person in a["people"]:
                     print(f"  - {person} ({role})")
+            conn.close()
 
         elif intent == "display_people":
             print("👥 Current people in the database:")
-            people_tasks = list_people_with_tasks(db_path="database/my_db.db")  # or your actual path
+            conn = sqlite3.connect("database/my_db.db")
+            people_tasks = list_people_with_tasks(conn=conn)
             for person_id, info in people_tasks.items():
                 print(f"** {info['name']} <{info['email']}> has tasks:")
                 for title, tag, role in info["tasks"]:
                     print(f"  - {title} (Tag: {tag}, Role: {role})")
+            conn.close()
 
         else:
             print("🤖 I’m not sure what you’re asking. Please clarify.")
