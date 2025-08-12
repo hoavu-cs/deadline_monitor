@@ -7,31 +7,6 @@ from db_queries import *
 OLLAMA_MODEL = "llama3"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-# ===== Function Signatures =====
-
-def query_ollama(prompt: str) -> str:
-    """Send prompt to Ollama API and return the generated response."""
-
-def classify_command(user_input: str) -> str:
-    """Classify a user command into one of the predefined intents."""
-
-def extract_person_fields(text: str) -> tuple[str | None, str | None]:
-    """Extract 'Name' and 'Email' from text."""
-
-def extract_task_fields(text: str) -> tuple[
-    str | None, str | None, str | None, list[str], list[str], int
-]:
-    """Extract task fields including title, description, deadline, emails, and importance."""
-
-def extract_person_task_fields(text: str) -> tuple[str | None, str | None, str | None]:
-    """Extract email, task tag, and role (supervisor/member) from text."""
-
-def extract_person_task_fields_for_deletions(text: str) -> tuple[str | None, str | None]:
-    """Extract email and task tag for deletion commands."""
-
-def generate_tag_with_llama(title: str) -> str:
-    """Generate a lowercase, unique task tag from a title."""
-
 # ===== Function Implementations =====
 
 def query_ollama(prompt: str):
@@ -45,9 +20,11 @@ def query_ollama(prompt: str):
 
 def classify_command(user_input: str):
     prompt = f"""
-            Classify the following command into one of: 'add_person', 'add_task', 'display_tasks', \
-                                                        'display_people', 'add_person_to_task', \
-                                                        'remove_person_from_task', or 'other'.
+            Classify the following command into one of: 'add_person', 'remove_person', \
+                                                        'add_task', 'remove_task', \
+                                                        'display_tasks', 'display_people', \
+                                                        'mark_tasks_completed', \
+                                                        'add_person_to_task', 'remove_person_from_task', or 'other'.
             Command: "{user_input}"
             
 
@@ -80,6 +57,56 @@ def extract_person_fields(text):
         elif line.lower().startswith("email:"):
             email = line.split(":", 1)[1].strip()
     return name, email
+
+def extract_emails(text):
+    prompt = f"""
+            Return output only in the following format:
+            Emails: <comma-separated list of email addresses>
+
+            Do not include explanations, comments, or extra lines.
+            Text:
+            {text}
+            """
+    output = query_ollama(prompt)
+
+    emails_line = None
+    for line in output.splitlines():
+        if line.strip().lower().startswith("emails:"):
+            emails_line = line.split(":", 1)[1].strip()
+            break
+
+    if not emails_line:
+        return []
+
+    # Split into list and remove empty entries
+    emails = [e.strip() for e in emails_line.split(",") if e.strip()]
+    return emails
+
+def extract_tags(text):
+    prompt = f"""
+            Return output only in the following format:
+            Tags: <comma-separated list of tags>
+            Constraints:
+            - Do not include explanations, comments, or extra lines.
+            - Do not modify or remove the '#' symbol from the task Tag.
+            Text:
+            {text}
+            """
+    output = query_ollama(prompt)
+    print(output)
+
+    tags_line = None
+    for line in output.splitlines():
+        if line.strip().lower().startswith("tags:"):
+            tags_line = line.split(":", 1)[1].strip()
+            break
+
+    if not tags_line:
+        return []
+
+    # Split into a list and clean whitespace
+    tags = [t.strip() for t in tags_line.split(",") if t.strip()]
+    return tags
 
 def extract_task_fields(text):
     prompt = f"""
@@ -219,12 +246,25 @@ if __name__ == "__main__":
             else:
                 print(f"❌ Failed to add person: {name} ({email})")
             conn.close()
+        
+        elif intent == "remove_person":
+            emails = extract_emails(user_input)
+            conn = sqlite3.connect("database/my_db.db")
+            for email in emails:
+                result = remove_person(email, conn)
+                if result:
+                    print(f"✅ Person removed: {email}")
+                else:
+                    print(f"❌ Failed to remove person: {email}")
+            conn.close()
 
         elif intent == "add_task":
             title, desc, deadline, supervisor_emails, member_emails, importance = extract_task_fields(user_input)
             tag = generate_tag_with_llama(title)
             conn = sqlite3.connect("database/my_db.db")
-            result = insert_task(title, desc, deadline, tag, supervisor_emails, member_emails, importance, conn)
+            result = insert_task(title=title, description=desc, deadline=deadline, tag=tag, \
+                                supervisor_emails=supervisor_emails, member_emails=member_emails, \
+                                importance=importance, conn=conn)
             if result:
                 print(f"✅ Task added: {title} (Tag: {tag})")
             else:
@@ -239,6 +279,29 @@ if __name__ == "__main__":
                 print(f"✅ Added {role} with email {email} to task with tag {task_tag}")
             else:
                 print(f"❌ Failed to add {role} with email {email} to task with tag {task_tag}")
+            conn.close()
+
+        elif intent == "mark_tasks_completed":
+            task_tags = extract_tags(user_input)
+            print(task_tags)
+            conn = sqlite3.connect("database/my_db.db")
+            for tag in task_tags:
+                result = mark_task_completed(tag, conn=conn)
+                if result:
+                    print(f"✅ Task marked as completed: {tag}")
+                else:
+                    print(f"❌ Failed to mark task as completed: {tag}")
+            conn.close()
+
+        elif intent == "remove_task":
+            task_tags = extract_tags(user_input)
+            conn = sqlite3.connect("database/my_db.db")
+            for tag in task_tags:
+                result = remove_task(tag, conn=conn)
+                if result:
+                    print(f"✅ Task removed: {tag}")
+                else:
+                    print(f"❌ Failed to remove task: {tag}")
             conn.close()
 
         elif intent == "remove_person_from_task":
@@ -256,7 +319,7 @@ if __name__ == "__main__":
             conn = sqlite3.connect("database/my_db.db")
             assignments = list_tasks_with_people(conn=conn)
             for a in assignments.values():
-                print(f"** Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}")
+                print(f"** Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}, Completed: {a['completed']}")
                 for role, person in a["people"]:
                     print(f"  - {person} ({role})")
             conn.close()

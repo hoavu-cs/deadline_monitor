@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     description TEXT,
     deadline TEXT,
     tag TEXT UNIQUE,
-    importance INTEGER CHECK(importance BETWEEN 1 AND 5) DEFAULT 3
+    importance INTEGER CHECK(importance BETWEEN 1 AND 5) DEFAULT 3,
+    completed BOOLEAN DEFAULT FALSE
 )
 """)
 
@@ -30,8 +31,8 @@ CREATE TABLE IF NOT EXISTS task_assignments (
     person_id INTEGER,
     task_id INTEGER,
     role TEXT CHECK(role IN ('supervisor', 'member')),
-    FOREIGN KEY (person_id) REFERENCES people(id),
-    FOREIGN KEY (task_id) REFERENCES tasks(id)
+    FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 )
 """)
 

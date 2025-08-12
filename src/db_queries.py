@@ -1,43 +1,7 @@
 import sqlite3
 from collections import OrderedDict
 from typing import Iterable
-
 from typing import Optional, Union
-import sqlite3
-from collections import OrderedDict
-
-# ===== Function Signatures =====
-
-"""
-def insert_person(name: str, email: str, conn: sqlite3.Connection) -> bool:
-
-def insert_task(
-    title: str,
-    description: str,
-    deadline: str,
-    tag: str,
-    supervisor_emails: list[str],
-    member_emails: list[str],
-    importance: int = 3,
-    conn: sqlite3.Connection
-) -> bool:
-
-def insert_person_task_pair(
-    email: str,
-    task_tag: str,
-    role: str,
-    db_path: str,
-    conn: sqlite3.Connection
-) -> bool:
-
-def remove_person_task_pair(email: str, task_tag: str, conn: sqlite3.Connection) -> bool:
-
-def get_id_by_email(email: str, conn: sqlite3.Connection) -> Optional[int]:
-
-def list_people(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
-
-def list_people_with_tasks(conn: sqlite3.Connection) -> "OrderedDict[int, dict[str, Union[str, list[tuple[str, str, str]]]]]":
-"""
 
 # ===== Function Implementations =====
 
@@ -67,28 +31,44 @@ def insert_person(name: str, email: str, conn: sqlite3.Connection) -> bool:
         print(f"❌ Database error: {e}")
         return False
 
+def remove_person(email: str, conn: sqlite3.Connection) -> bool:
+    if not conn:
+        raise ValueError("conn must be provided")
+
+    email = (email or "").strip()
+    if not email:
+        print("❌ Missing email.")
+        return False
+
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        cur = conn.cursor()
+        cur.execute("DELETE FROM people WHERE email = ?", (email,))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"❌ Database error: {e}")
+        return False
+
 def insert_task(
-    title, 
-    description, 
-    deadline, 
-    tag, 
-    supervisor_emails, 
-    member_emails, 
-    importance, 
-    conn: sqlite3.Connection
+    title: str,
+    description: str,
+    deadline: str,
+    tag: str,
+    supervisor_emails: list[str],
+    member_emails: list[str],
+    conn: sqlite3.Connection,
+    importance: int = 3,
 ) -> bool:
     if not title or not description or not deadline:
         print("❌ Missing one or more task fields. Task not added.")
         return False
 
-    if importance == 0:
-        importance = 3
-
     cursor = conn.cursor()
 
     # Insert the task
-    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance) VALUES (?, ?, ?, ?, ?)", \
-        (title, description, deadline, tag, importance))
+    cursor.execute("INSERT INTO tasks (title, description, deadline, tag, importance, completed) VALUES (?, ?, ?, ?, ?, ?)", \
+        (title, description, deadline, tag, importance, False))
     conn.commit()
 
     # Get task ID
@@ -97,11 +77,10 @@ def insert_task(
 
     if not result:
         print("❌ Could not find task after insertion.")
-        return 
+        return False
 
     task_id = result[0]
     print(f"✅ Task added: Title: {title}, Description: {description}, Deadline: {deadline}, Tag: {tag}, Importance: {importance}")
-
 
     # Handle supervisor assignment
     for email in supervisor_emails:
@@ -121,6 +100,45 @@ def insert_task(
 
     conn.commit()
     return True
+
+def remove_task(task_tag: str, conn: sqlite3.Connection) -> bool:
+    if not conn:
+        raise ValueError("conn must be provided")
+
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tasks WHERE tag = ?", (task_tag,))
+        conn.commit()
+        return cur.rowcount > 0
+    except sqlite3.Error as e:
+        print(f"❌ Database error: {e}")
+        return False
+
+def mark_task_completed(task_tag: str, conn: sqlite3.Connection) -> bool:
+    if not conn:
+        raise ValueError("conn must be provided")
+
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE tasks SET completed = ? WHERE tag = ?", (True, task_tag))
+        conn.commit()
+        return cur.rowcount > 0
+    except sqlite3.Error as e:
+        print(f"❌ Database error: {e}")
+        return False
+
+# def remove_task(task_tag: str, conn: sqlite3.Connection):
+#     if not conn:
+#         raise ValueError("conn must be provided")
+
+#     try:
+#         cur = conn.cursor()
+#         cur.execute("DELETE FROM tasks WHERE tag = ?", (task_tag,))
+#         conn.commit()
+#         return True
+#     except sqlite3.Error as e:
+#         print(f"❌ Database error: {e}")
+#         return False
 
 def insert_person_task_pair(email: str, task_tag: str, role: str, conn: sqlite3.Connection) -> bool:
     """
@@ -247,6 +265,7 @@ def list_tasks_with_people(conn):
             t.description,
             t.tag,
             t.importance,
+            t.completed,
             p.name,
             p.email,
             a.role
@@ -257,13 +276,14 @@ def list_tasks_with_people(conn):
     """)
 
     tasks = {}
-    for task_id, title, desc, tag, importance, name, email, role in cur.fetchall():
+    for task_id, title, desc, tag, importance, completed, name, email, role in cur.fetchall():
         if task_id not in tasks:
             tasks[task_id] = {
                 "title": title,
                 "description": desc,
                 "tag": tag,
                 "importance": importance,
+                "completed": completed,
                 "people": []
             }
         # keep tuples; person string does NOT include role
