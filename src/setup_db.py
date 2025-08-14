@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS people (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
+    title TEXT NOT NULL,
     description TEXT,
-    deadline TEXT,
+    deadline TEXT NOT NULL,
     tag TEXT UNIQUE,
     importance INTEGER CHECK(importance BETWEEN 1 AND 5) DEFAULT 3,
     completed BOOLEAN DEFAULT FALSE

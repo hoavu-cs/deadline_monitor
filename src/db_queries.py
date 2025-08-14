@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 from collections import OrderedDict
 from typing import Iterable
 from typing import Optional, Union
@@ -127,18 +128,29 @@ def mark_task_completed(task_tag: str, conn: sqlite3.Connection) -> bool:
         print(f"❌ Database error: {e}")
         return False
 
-# def remove_task(task_tag: str, conn: sqlite3.Connection):
-#     if not conn:
-#         raise ValueError("conn must be provided")
+def list_overdue_tasks(conn: sqlite3.Connection):
+    """
+    Returns a list of overdue tasks (deadline before today and not completed).
+    Each item is a tuple: (id, title, description, deadline, tag, importance)
+    """
+    if not conn:
+        raise ValueError("conn must be provided")
 
-#     try:
-#         cur = conn.cursor()
-#         cur.execute("DELETE FROM tasks WHERE tag = ?", (task_tag,))
-#         conn.commit()
-#         return True
-#     except sqlite3.Error as e:
-#         print(f"❌ Database error: {e}")
-#         return False
+    conn.execute("PRAGMA foreign_keys = ON")
+    cur = conn.cursor()
+
+    today = datetime.today().strftime("%Y-%m-%d")
+    cur.execute("""
+        SELECT id, title, description, deadline, tag, importance
+        FROM tasks
+        WHERE completed = 0
+          AND DATE(deadline) < DATE(?)
+        ORDER BY DATE(deadline) ASC
+    """, (today,))
+
+    overdue_tasks = cur.fetchall()
+    conn.commit()
+    return overdue_tasks
 
 def insert_person_task_pair(email: str, task_tag: str, role: str, conn: sqlite3.Connection) -> bool:
     """
@@ -269,10 +281,10 @@ def list_tasks_with_people(conn):
             p.name,
             p.email,
             a.role
-        FROM task_assignments a
-        JOIN tasks  t ON a.task_id = t.id
-        JOIN people p ON a.person_id = p.id
-        ORDER BY t.id, p.name
+        FROM tasks t
+        LEFT JOIN task_assignments a ON a.task_id = t.id
+        LEFT JOIN people p ON p.id = a.person_id
+        ORDER BY t.importance DESC
     """)
 
     tasks = {}

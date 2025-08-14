@@ -4,12 +4,12 @@ import re
 import random
 from db_queries import *
 
-OLLAMA_MODEL = "llama3"
+OLLAMA_MODEL = "llama3:8b"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 # ===== Function Implementations =====
 
-def query_ollama(prompt: str):
+def query_ollama(prompt: str) -> str:
     response = requests.post(
         OLLAMA_URL,
         json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
@@ -18,13 +18,12 @@ def query_ollama(prompt: str):
         raise RuntimeError(f"Ollama error: {response.text}")
     return response.json()["response"]
 
-def classify_command(user_input: str):
+def classify_command(user_input: str) -> str:
     prompt = f"""
-            Classify the following command into one of: 'add_person', 'remove_person', \
-                                                        'add_task', 'remove_task', \
-                                                        'display_tasks', 'display_people', \
-                                                        'mark_tasks_completed', \
-                                                        'add_person_to_task', 'remove_person_from_task', or 'other'.
+            Classify the following command into one of: 'add_person', 
+            'remove_person', 'add_task', 'remove_task', 'display_tasks', 
+            'display_people', 'mark_tasks_completed', 'add_person_to_task', 
+            'remove_person_from_task', 'list_overdue_tasks', or 'other'.
             Command: "{user_input}"
             
 
@@ -34,7 +33,7 @@ def classify_command(user_input: str):
             """
     return query_ollama(prompt).strip("'\"").lower()
 
-def extract_person_fields(text):
+def extract_person_fields(text) -> tuple[str, str]:
     prompt = f"""
             Extract the following fields from the text below.
 
@@ -58,7 +57,7 @@ def extract_person_fields(text):
             email = line.split(":", 1)[1].strip()
     return name, email
 
-def extract_emails(text):
+def extract_emails(text) -> list[str]:
     prompt = f"""
             Return output only in the following format:
             Emails: <comma-separated list of email addresses>
@@ -82,13 +81,13 @@ def extract_emails(text):
     emails = [e.strip() for e in emails_line.split(",") if e.strip()]
     return emails
 
-def extract_tags(text):
+def extract_tags(text) -> list[str]:
     prompt = f"""
             Return output only in the following format:
             Tags: <comma-separated list of tags>
             Constraints:
             - Do not include explanations, comments, or extra lines.
-            - Do not modify or remove the '#' symbol from the task Tag.
+            - Keep the '#' symbol from the task Tag. For example: #task123.
             Text:
             {text}
             """
@@ -108,7 +107,7 @@ def extract_tags(text):
     tags = [t.strip() for t in tags_line.split(",") if t.strip()]
     return tags
 
-def extract_task_fields(text):
+def extract_task_fields(text) -> tuple[str, str, str, list[str], list[str], int]:
     prompt = f"""
             You are an assistant that extracts structured task information from the following input.
 
@@ -152,7 +151,7 @@ def extract_task_fields(text):
     print(f"{output}")
     return title, desc, deadline, supervisor_emails, member_emails, importance
 
-def extract_person_task_fields(text):
+def extract_person_task_fields(text) -> tuple[str, str, str]:
     prompt = f"""
             Extract the following fields from the text below.
 
@@ -184,7 +183,7 @@ def extract_person_task_fields(text):
         
     return email, task_tag, role
 
-def extract_person_task_fields_for_deletions(text):
+def extract_person_task_fields_for_deletions(text) -> tuple[str, str]:
     prompt = f"""
             Extract the following fields from the text below.
 
@@ -210,7 +209,7 @@ def extract_person_task_fields_for_deletions(text):
 
     return email, task_tag
 
-def generate_tag_with_llama(title: str):
+def generate_tag_with_llama(title: str) -> str:
     prompt = f"""
     Generate a lowercase tag based on the task title.
     - Use short keywords from the title (lowercase, no punctuation)
@@ -295,6 +294,7 @@ if __name__ == "__main__":
 
         elif intent == "remove_task":
             task_tags = extract_tags(user_input)
+            print(task_tags)
             conn = sqlite3.connect("database/my_db.db")
             for tag in task_tags:
                 result = remove_task(tag, conn=conn)
@@ -319,19 +319,30 @@ if __name__ == "__main__":
             conn = sqlite3.connect("database/my_db.db")
             assignments = list_tasks_with_people(conn=conn)
             for a in assignments.values():
-                print(f"** Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}, Completed: {a['completed']}")
+                print(f"😐 Title: {a['title']}, Description: {a['description']}, Tag: {a['tag']}, Importance: {a['importance']}, Completed: {a['completed']}")
                 for role, person in a["people"]:
                     print(f"  - {person} ({role})")
             conn.close()
 
         elif intent == "display_people":
-            print("👥 Current people in the database:")
+            print("Current people in the database:")
             conn = sqlite3.connect("database/my_db.db")
             people_tasks = list_people_with_tasks(conn=conn)
             for person_id, info in people_tasks.items():
-                print(f"** {info['name']} <{info['email']}> has tasks:")
+                print(f"🙂 {info['name']} <{info['email']}> has tasks:")
                 for title, tag, role in info["tasks"]:
                     print(f"  - {title} (Tag: {tag}, Role: {role})")
+            conn.close()
+
+        elif intent == "list_overdue_tasks":
+            print("⏰ Overdue tasks:")
+            conn = sqlite3.connect("database/my_db.db")
+            overdue_tasks = list_overdue_tasks(conn=conn)
+            if overdue_tasks:
+                for (id_, title, description, deadline, tag, importance) in overdue_tasks:
+                    print(f"  - {title} (Tag: {tag}, Deadline: {deadline})")
+            else:
+                print("  No overdue tasks found.")
             conn.close()
 
         else:
